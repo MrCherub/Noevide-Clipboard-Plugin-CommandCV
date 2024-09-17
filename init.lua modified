@@ -1,0 +1,118 @@
+
+
+vim.g.neovide_channel_id = vim.g.neovide_channel_id or 0 -- Default value if not provided
+vim.g.neovide_version = vim.g.neovide_version or "unknown"
+
+-- Set some basic rendering options.
+vim.o.lazyredraw = false
+vim.o.termguicolors = true
+
+local function rpcnotify(method, ...)
+    vim.rpcnotify(vim.g.neovide_channel_id, method, ...)
+end
+
+local function rpcrequest(method, ...)
+    return vim.rpcrequest(vim.g.neovide_channel_id, method, ...)
+end
+	require('numbers').setup()
+	
+-- Clipboard integration
+if not vim.g.neovide_no_custom_clipboard then
+    vim.g.clipboard = {
+        name = "neovide",
+        copy = {
+            ["+"] = function(lines) rpcrequest("neovide.set_clipboard", lines, "+") end,
+            ["*"] = function(lines) rpcrequest("neovide.set_clipboard", lines, "*") end,
+        },
+        paste = {
+            ["+"] = function() return rpcrequest("neovide.get_clipboard", "+") end,
+            ["*"] = function() return rpcrequest("neovide.get_clipboard", "*") end,
+        },
+        cache_enabled = false
+    }
+    vim.g.loaded_clipboard_provider = nil
+    vim.cmd.runtime("autoload/provider/clipboard.vim")
+end
+
+-- Right-click registration
+vim.api.nvim_create_user_command("NeovideRegisterRightClick", function()
+    rpcnotify("neovide.register_right_click")
+end, {})
+
+vim.api.nvim_create_user_command("NeovideUnregisterRightClick", function()
+    rpcnotify("neovide.unregister_right_click")
+end, {})
+
+-- Focus command
+vim.api.nvim_create_user_command("NeovideFocus", function()
+    rpcnotify("neovide.focus_window")
+end, {})
+
+-- Sync Neovide options with Neovim
+vim.api.nvim_exec([[
+function! WatchGlobal(variable, callback)
+    call dictwatcheradd(g:, a:variable, a:callback)
+endfunction
+]], false)
+
+-- If you want to watch more global settings, add them here
+local global_variable_settings = {"example_setting"} -- Replace with your settings
+for _, global_variable_setting in ipairs(global_variable_settings) do
+    local callback = function()
+        rpcnotify("setting_changed", global_variable_setting, vim.g["neovide_" .. global_variable_setting])
+    end
+    vim.fn.WatchGlobal("neovide_" .. global_variable_setting, callback)
+end
+
+-- Track option changes, adjust options if needed
+local option_settings = {"lines", "columns"} -- Add more options as needed
+for _, option_setting in ipairs(option_settings) do
+    vim.api.nvim_create_autocmd({ "OptionSet" }, {
+        pattern = option_setting,
+        once = false,
+        nested = true,
+        callback = function()
+            rpcnotify("option_changed", option_setting, vim.o[option_setting])
+        end
+    })
+end
+
+-- Auto commands for startup and exit behavior
+vim.api.nvim_create_autocmd({ "VimEnter" }, {
+    once = true,
+    nested = true,
+    callback = function()
+        for _, option_setting in ipairs(option_settings) do
+            if option_setting ~= "lines" and option_setting ~= "columns" then
+                rpcnotify("option_changed", option_setting, vim.o[option_setting])
+            end
+        end
+    end
+})
+
+vim.api.nvim_create_autocmd({ "VimLeavePre" }, {
+    pattern = "*",
+    once = true,
+    nested = true,
+    callback = function()
+        rpcrequest("neovide.quit", vim.v.exiting)
+    end
+})
+
+-- Neovide clipboard integration for macOS
+vim.g.neovide_input_use_logo = 1
+
+-- Map Command+V to paste from clipboard in Normal Mode
+vim.api.nvim_set_keymap('n', '<D-v>', '"+p', { noremap = true, silent = true })
+
+-- Map Command+V to paste from clipboard in Insert Mode
+vim.api.nvim_set_keymap('i', '<D-v>', '<C-R>+', { noremap = true, silent = true })
+
+-- Map Command+V to paste from clipboard in Terminal Mode
+vim.api.nvim_set_keymap('t', '<D-v>', '<C-R>+', { noremap = true, silent = true })
+
+-- Map Command+C to copy to clipboard in Visual Mode
+vim.api.nvim_set_keymap('v', '<D-c>', '"+y', { noremap = true, silent = true })
+
+-- Optionally, if you want to handle Command+C in Normal Mode as well
+vim.api.nvim_set_keymap('n', '<D-c>', '"+y', { noremap = true, silent = true })
